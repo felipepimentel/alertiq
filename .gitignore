@@ -26,3 +26,7 @@ Cargo.lock
 # Private keys
 *.pem
 *.key
+
+server.sh
+server.log
+ngrok.log
