@@ -8,6 +8,7 @@ use std::env;
 use colored::*;
 use chrono::Local;
 use log::info;
+use notify_rust::Notification;
 
 const DEFAULT_PORT: u16 = 5000;
 
@@ -16,6 +17,33 @@ struct Claims {
     iat: usize,
     exp: usize,
     iss: String,
+}
+
+/// Send desktop notification
+fn send_notification(title: &str, body: &str, url: Option<&str>) {
+    let mut notification_base = Notification::new();
+    let mut notification = notification_base
+        .summary(title)
+        .body(body)
+        .icon("github")
+        .timeout(notify_rust::Timeout::Milliseconds(5000)); // 5 seconds
+
+    if let Some(url) = url {
+        notification = notification.action("default", "Open in browser");
+        if let Err(e) = notification.show() {
+            eprintln!("Failed to show notification: {}", e);
+            return;
+        }
+
+        // Open URL directly
+        if let Err(e) = open::that(url) {
+            eprintln!("Failed to open URL: {}", e);
+        }
+    } else {
+        if let Err(e) = notification.show() {
+            eprintln!("Failed to show notification: {}", e);
+        }
+    }
 }
 
 /// Generates a JWT for GitHub App authentication
@@ -43,21 +71,39 @@ fn generate_jwt() -> Result<String, Box<dyn std::error::Error>> {
     )?)
 }
 
-/// Log webhook details
-fn log_webhook_details(payload: &serde_json::Value) {
+/// Log webhook details and send notifications
+fn handle_workflow_event(payload: &serde_json::Value) {
     let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
     println!("\n{}", "=".repeat(50).yellow());
-    println!("{} {}", timestamp.blue(), "Webhook Received".green());
+    println!("{} {}", timestamp.blue(), "Workflow Event Received".green());
     
-    // Log event type if present
-    if let Some(event_type) = payload.get("action") {
-        println!("Event Type: {}", event_type.to_string().cyan());
-    }
+    if let Some(workflow_run) = payload.get("workflow_run") {
+        let repo_name = payload["repository"]["full_name"].as_str().unwrap_or("unknown");
+        let workflow_name = workflow_run["name"].as_str().unwrap_or("unknown");
+        let status = workflow_run["status"].as_str().unwrap_or("unknown");
+        let conclusion = workflow_run["conclusion"].as_str().unwrap_or("unknown");
+        let html_url = workflow_run["html_url"].as_str();
+        let commit_message = workflow_run["head_commit"]["message"].as_str().unwrap_or("No commit message");
 
-    // Log repository details
-    if let Some(repo) = payload.get("repository") {
-        if let Some(repo_name) = repo.get("full_name") {
-            println!("Repository: {}", repo_name.to_string().cyan());
+        println!("Repository: {}", repo_name.cyan());
+        println!("Workflow: {}", workflow_name.cyan());
+        println!("Status: {}", status.yellow());
+        println!("Conclusion: {}", conclusion.yellow());
+        println!("Commit: {}", commit_message.white());
+        
+        if let Some(url) = html_url {
+            println!("URL: {}", url.blue().underline());
+            
+            let title = format!("GitHub Workflow {}", 
+                if conclusion == "success" { "✅" } else { "❌" });
+            
+            let body = format!("{}\n{}\nStatus: {}\nRepo: {}",
+                workflow_name,
+                commit_message.lines().next().unwrap_or(""),
+                conclusion.to_uppercase(),
+                repo_name);
+            
+            send_notification(&title, &body, Some(url));
         }
     }
 
@@ -70,7 +116,7 @@ fn log_webhook_details(payload: &serde_json::Value) {
 /// Webhook event handler
 #[post("/webhook")]
 async fn webhook_handler(payload: web::Json<serde_json::Value>) -> impl Responder {
-    log_webhook_details(&payload);
+    handle_workflow_event(&payload);
     web::Json(serde_json::json!({"status": "success"}))
 }
 
@@ -96,7 +142,7 @@ async fn main() -> std::io::Result<()> {
 
     // Generate and display JWT token
     match generate_jwt() {
-        Ok(token) => info!("JWT Token generated successfully"),
+        Ok(_token) => info!("JWT Token generated successfully"),
         Err(e) => eprintln!("Failed to generate JWT token: {}", e),
     }
 
