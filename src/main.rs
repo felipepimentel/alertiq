@@ -29,20 +29,12 @@ fn send_notification(title: &str, body: &str, url: Option<&str>) {
         .timeout(notify_rust::Timeout::Milliseconds(5000)); // 5 seconds
 
     if let Some(url) = url {
-        notification = notification.action("default", "Open in browser");
-        if let Err(e) = notification.show() {
-            eprintln!("Failed to show notification: {}", e);
-            return;
-        }
+        let body_with_url = format!("{}\n\nClick to open: {}", body, url);
+        notification = notification.body(&body_with_url);
+    }
 
-        // Open URL directly
-        if let Err(e) = open::that(url) {
-            eprintln!("Failed to open URL: {}", e);
-        }
-    } else {
-        if let Err(e) = notification.show() {
-            eprintln!("Failed to show notification: {}", e);
-        }
+    if let Err(e) = notification.show() {
+        eprintln!("Failed to show notification: {}", e);
     }
 }
 
@@ -94,8 +86,15 @@ fn handle_workflow_event(payload: &serde_json::Value) {
         if let Some(url) = html_url {
             println!("URL: {}", url.blue().underline());
             
-            let title = format!("GitHub Workflow {}", 
-                if conclusion == "success" { "✅" } else { "❌" });
+            let icon = match conclusion {
+                "success" => "✅",
+                "failure" => "❌",
+                "cancelled" => "⚪",
+                "skipped" => "⏭️",
+                _ => "🔄"
+            };
+            
+            let title = format!("GitHub Workflow {}", icon);
             
             let body = format!("{}\n{}\nStatus: {}\nRepo: {}",
                 workflow_name,
