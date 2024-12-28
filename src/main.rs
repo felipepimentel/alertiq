@@ -1,4 +1,4 @@
-use actix_web::{post, web, App, HttpServer, Responder, middleware::Logger};
+use actix_web::{get, post, web, App, HttpServer, Responder, middleware::Logger};
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 use serde::Serialize;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -74,6 +74,16 @@ async fn webhook_handler(payload: web::Json<serde_json::Value>) -> impl Responde
     web::Json(serde_json::json!({"status": "success"}))
 }
 
+/// Health check endpoint
+#[get("/")]
+async fn health_check() -> impl Responder {
+    web::Json(serde_json::json!({
+        "status": "online",
+        "message": "GitHub Webhook Server is running",
+        "version": env!("CARGO_PKG_VERSION")
+    }))
+}
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     dotenv().ok();
@@ -97,6 +107,7 @@ async fn main() -> std::io::Result<()> {
     HttpServer::new(|| {
         App::new()
             .wrap(Logger::default())
+            .service(health_check)
             .service(webhook_handler)
     })
     .bind(("0.0.0.0", port))?
